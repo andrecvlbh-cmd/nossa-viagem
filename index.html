@@ -245,6 +245,7 @@
     <button data-view="roteiro" class="active">Roteiro <span class="count" id="countRoteiro">0</span></button>
     <button data-view="transportes">Transportes <span class="count" id="countTransportes">0</span></button>
     <button data-view="acomodacoes">Acomodações <span class="count" id="countAcomodacoes">0</span></button>
+    <button data-view="extras">Gastos Extras <span class="count" id="countExtras">0</span></button>
     <button data-view="orcamento">Orçamento</button>
   </nav>
 
@@ -261,6 +262,11 @@
   <section class="view" id="view-acomodacoes">
     <div id="lodgingList"></div>
     <button class="btn btn-add" id="addAcomodacao">+ Adicionar acomodação</button>
+  </section>
+
+  <section class="view" id="view-extras">
+    <div id="extrasList"></div>
+    <button class="btn btn-add" id="addExtra">+ Adicionar gasto extra</button>
   </section>
 
   <section class="view" id="view-orcamento">
@@ -308,7 +314,8 @@
     trip: { title:'Nossa viagem', destino:'', inicio:'', fim:'', moeda:'R$', p1:'Você', p2:'Sua namorada' },
     days: [],
     transports: [],
-    lodgings: []
+    lodgings: [],
+    extras: []
   };
 
   var firebaseReady = FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.indexOf('COLE_AQUI') === -1;
@@ -534,7 +541,7 @@
           '<div class="field"><label>Preço</label><div class="val price mono" contenteditable="true" data-field="price" data-ph="0,00">'+(item.price||'')+'</div></div>'+
         '</div>'+
         '<div class="item-notes" contenteditable="true" data-field="notes">'+(item.notes||'')+'</div>';
-      bindItemCard(card, item, renderTransports);
+      bindItemCard(card, item, state.transports, renderTransports);
       card.querySelector('[data-field="type"]').addEventListener('change', function(){
         item.type = this.value; card.querySelector('.item-icon').textContent = transportIcons[item.type]||'●'; scheduleSave();
       });
@@ -573,7 +580,7 @@
           '<div class="field"><label>Preço total</label><div class="val price mono" contenteditable="true" data-field="price" data-ph="0,00">'+(item.price||'')+'</div></div>'+
         '</div>'+
         '<div class="item-notes" contenteditable="true" data-field="notes">'+(item.notes||'')+'</div>';
-      bindItemCard(card, item, renderLodgings);
+      bindItemCard(card, item, state.lodgings, renderLodgings);
       list.appendChild(card);
     });
   }
@@ -582,10 +589,50 @@
     renderLodgings(); scheduleSave();
   });
 
-  function bindItemCard(card, item, rerender){
+  // ---------- Gastos Extras ----------
+  var extraIcons = {'Comida':'🍽','Compras':'🛍','Passeio':'🎟','Emergência':'⚕','Outro':'●'};
+  function renderExtras(){
+    var list = document.getElementById('extrasList');
+    list.innerHTML='';
+    document.getElementById('countExtras').textContent = state.extras.length;
+    if(state.extras.length===0){
+      list.innerHTML = '<div class="empty"><div class="display">Nenhum gasto extra ainda</div>Comidas, compras, passeios ou imprevistos da viagem.</div>';
+      return;
+    }
+    state.extras.forEach(function(item){
+      var card = document.createElement('div');
+      card.className='item-card';
+      var opts = Object.keys(extraIcons).map(function(k){ return '<option'+(item.category===k?' selected':'')+'>'+k+'</option>'; }).join('');
+      card.innerHTML =
+        '<div class="item-top">'+
+          '<div class="item-title-row">'+
+            '<div class="item-icon">'+(extraIcons[item.category]||'●')+'</div>'+
+            '<select class="type-select" data-field="category">'+opts+'</select>'+
+          '</div>'+
+          '<button class="btn btn-ghost btn-sm" data-action="del">Remover</button>'+
+        '</div>'+
+        '<div class="item-fields">'+
+          '<div class="field"><label>Descrição</label><div class="val" contenteditable="true" data-field="desc" data-ph="Ex: Jantar, presente...">'+(item.desc||'')+'</div></div>'+
+          '<div class="field"><label>Data</label><input type="date" class="val mono" data-field="date" value="'+(item.date||'')+'"></div>'+
+          '<div class="field"><label>Preço</label><div class="val price mono" contenteditable="true" data-field="price" data-ph="0,00">'+(item.price||'')+'</div></div>'+
+        '</div>'+
+        '<div class="item-notes" contenteditable="true" data-field="notes">'+(item.notes||'')+'</div>';
+      bindItemCard(card, item, state.extras, renderExtras);
+      card.querySelector('[data-field="category"]').addEventListener('change', function(){
+        item.category = this.value; card.querySelector('.item-icon').textContent = extraIcons[item.category]||'●'; scheduleSave();
+      });
+      list.appendChild(card);
+    });
+  }
+  document.getElementById('addExtra').addEventListener('click', function(){
+    state.extras.push({id:uid(), category:'Comida', desc:'', date:'', price:'', notes:''});
+    renderExtras(); scheduleSave();
+  });
+
+  function bindItemCard(card, item, arr, rerender){
     card.querySelectorAll('[data-field]').forEach(function(el){
       var f = el.dataset.field;
-      if(f==='type') return;
+      if(f==='type' || f==='category') return;
       var evt = (el.tagName==='INPUT') ? 'change' : 'input';
       el.addEventListener(evt, function(){
         var v = (el.tagName==='INPUT') ? el.value : textOrEmpty(el);
@@ -596,7 +643,6 @@
     });
     card.querySelector('[data-action="del"]').addEventListener('click', function(){
       if(confirm('Remover este item?')){
-        var arr = (item.name!==undefined) ? state.lodgings : state.transports;
         var idx = arr.findIndex(function(x){ return x.id===item.id; });
         if(idx>-1) arr.splice(idx,1);
         rerender(); scheduleSave();
@@ -610,12 +656,14 @@
     var totalTransport = state.transports.reduce(function(s,i){ return s+num(i.price); },0);
     var totalLodging = state.lodgings.reduce(function(s,i){ return s+num(i.price); },0);
     var totalDays = state.days.reduce(function(s,i){ return s+num(i.cost); },0);
-    var grand = totalTransport+totalLodging+totalDays;
+    var totalExtras = state.extras.reduce(function(s,i){ return s+num(i.price); },0);
+    var grand = totalTransport+totalLodging+totalDays+totalExtras;
 
     var rows = [];
     state.transports.forEach(function(i){ rows.push({cat:'Transporte', desc:[i.type,i.from&&i.to?(i.from+' → '+i.to):(i.from||i.to)].filter(Boolean).join(' · '), price:num(i.price)}); });
-    state.lodgings.forEach(function(i){ rows.push({cat:'Acomodação', desc:i.name||'(sem nome)', price:num(i.price)}); });
+    state.lodgings.forEach(function(i){ rows.push({cat:'Acomodação', desc:(i.location||i.name)||'(sem local)', price:num(i.price)}); });
     state.days.forEach(function(i){ if(num(i.cost)>0) rows.push({cat:'Roteiro', desc:(i.place||'(sem local)')+(i.date?' · '+fmtDateLong(i.date):''), price:num(i.cost)}); });
+    state.extras.forEach(function(i){ rows.push({cat:'Gasto extra', desc:[i.category,i.desc].filter(Boolean).join(' · ')||'(sem descrição)', price:num(i.price)}); });
 
     var html = '';
     html += '<div class="summary-hero"><div><div class="label">Custo total da viagem</div><div class="total mono">'+fmtMoney(grand)+'</div><div class="per-person">'+fmtMoney(grand/2)+' por pessoa · '+ (state.trip.p1||'Viajante 1') +' e '+ (state.trip.p2||'Viajante 2') +'</div></div></div>';
@@ -623,6 +671,7 @@
     html += '<div class="bd-card"><div class="cat">Transportes</div><div class="amt mono">'+fmtMoney(totalTransport)+'</div></div>';
     html += '<div class="bd-card"><div class="cat">Acomodações</div><div class="amt mono">'+fmtMoney(totalLodging)+'</div></div>';
     html += '<div class="bd-card"><div class="cat">Roteiro / passeios</div><div class="amt mono">'+fmtMoney(totalDays)+'</div></div>';
+    html += '<div class="bd-card"><div class="cat">Gastos extras</div><div class="amt mono">'+fmtMoney(totalExtras)+'</div></div>';
     html += '</div>';
 
     if(rows.length===0){
@@ -643,6 +692,7 @@
     renderDays();
     renderTransports();
     renderLodgings();
+    renderExtras();
     renderBudget();
   }
 
@@ -669,7 +719,7 @@
       try{
         var parsed = JSON.parse(reader.result);
         if(confirm('Importar este backup vai substituir os dados atuais. Continuar?')){
-          state = Object.assign({trip:{},days:[],transports:[],lodgings:[]}, parsed);
+          state = Object.assign({trip:{},days:[],transports:[],lodgings:[],extras:[]}, parsed);
           render(); scheduleSave();
         }
       }catch(err){ alert('Arquivo inválido.'); }
@@ -695,6 +745,9 @@
     });
     state.days.forEach(function(i){
       lines.push(['Roteiro', i.place||'', i.notes? i.notes.replace(/\n/g,' | ') : '', i.date||'', num(i.cost).toFixed(2)].map(csvEscape).join(';'));
+    });
+    state.extras.forEach(function(i){
+      lines.push(['Gasto extra', i.category||'', i.desc||'', i.date||'', num(i.price).toFixed(2)].map(csvEscape).join(';'));
     });
     download('roteiro-viagem.csv', '\uFEFF'+lines.join('\n'), 'text/csv;charset=utf-8');
   });
